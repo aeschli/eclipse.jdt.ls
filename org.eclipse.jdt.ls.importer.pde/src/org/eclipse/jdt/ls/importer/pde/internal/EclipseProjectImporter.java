@@ -27,7 +27,7 @@ import org.eclipse.jdt.core.JavaCore;
 public class EclipseProjectImporter {
 
 	public void importDir(java.nio.file.Path dir, IProgressMonitor m) throws CoreException {
-		SubMonitor monitor = SubMonitor.convert(m, 4);
+		SubMonitor monitor = SubMonitor.convert(m, 3);
 		IWorkspace workspace = ResourcesPlugin.getWorkspace();
 		IPath dotProjectPath = new Path(dir.resolve(DESCRIPTION_FILE_NAME).toAbsolutePath().toString());
 		IProjectDescription descriptor;
@@ -47,8 +47,7 @@ public class EclipseProjectImporter {
 					project.refreshLocal(IResource.DEPTH_INFINITE, monitor.split(1));
 					return;
 				} else {
-					project = findUniqueProject(workspace, name);
-					descriptor.setName(project.getName());
+					project.delete(true, true, monitor.split(1));
 				}
 			}
 			project.create(descriptor, monitor.split(1));
@@ -63,16 +62,6 @@ public class EclipseProjectImporter {
 			return path.setDevice(path.getDevice().toUpperCase());
 		}
 		return path;
-	}
-
-	private IProject findUniqueProject(IWorkspace workspace, String basename) {
-		IProject project = null;
-		String name;
-		for (int i = 1; project == null || project.exists(); i++) {
-			name = (i < 2) ? basename : basename + " (" + i + ")";
-			project = workspace.getRoot().getProject(name);
-		}
-		return project;
 	}
 
 }
