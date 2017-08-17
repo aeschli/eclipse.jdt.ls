@@ -16,8 +16,6 @@ import static java.util.Arrays.asList;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Optional;
-import java.util.stream.Stream;
 
 import org.eclipse.core.resources.IFolder;
 import org.eclipse.core.resources.IProject;
@@ -47,7 +45,6 @@ import org.eclipse.jdt.ls.core.internal.ActionableNotification;
 import org.eclipse.jdt.ls.core.internal.JDTUtils;
 import org.eclipse.jdt.ls.core.internal.JavaClientConnection.JavaLanguageClient;
 import org.eclipse.jdt.ls.core.internal.JavaLanguageServerPlugin;
-import org.eclipse.jdt.ls.core.internal.ProjectUtils;
 import org.eclipse.jdt.ls.core.internal.ServiceStatus;
 import org.eclipse.jdt.ls.core.internal.StatusFactory;
 import org.eclipse.jdt.ls.core.internal.preferences.PreferenceManager;
@@ -62,14 +59,18 @@ public class ProjectsManager {
 	public static final String DEFAULT_PROJECT_NAME= "jdt.ls-java-project";
 	private PreferenceManager preferenceManager;
 	private JavaLanguageClient client;
+	private IBuildSupport activeBuildSupport;
 
 	public enum CHANGE_TYPE { CREATED, CHANGED, DELETED};
 
 	public ProjectsManager(PreferenceManager preferenceManager) {
 		this.preferenceManager = preferenceManager;
+
 	}
 
 	public void initializeProjects(final String projectPath, IProgressMonitor monitor) throws CoreException, OperationCanceledException {
+		this.activeBuildSupport = null;
+
 		// Run as a Java runnable to trigger any build while importing
 		JavaCore.run(new IWorkspaceRunnable() {
 			@Override
@@ -111,7 +112,7 @@ public class ProjectsManager {
 				FeatureStatus status = preferenceManager.getPreferences().getUpdateBuildConfigurationStatus();
 				switch (status) {
 				case automatic:
-					updateProject(resource.getProject());
+						updateProject(resource.getProject());
 					break;
 				case disabled:
 					break;
@@ -137,7 +138,7 @@ public class ProjectsManager {
 	}
 
 	public boolean isBuildFile(IResource resource) {
-		return buildSupports().filter(bs -> bs.isBuildFile(resource)).findAny().isPresent();
+		return this.activeBuildSupport != null && this.activeBuildSupport.isBuildFile(resource);
 	}
 
 	private IProjectImporter getImporter(File rootFolder, IProgressMonitor monitor) throws OperationCanceledException, CoreException {
@@ -215,9 +216,10 @@ public class ProjectsManager {
 	}
 
 	public void updateProject(IProject project) {
-		if (!ProjectUtils.isMavenProject(project) && !ProjectUtils.isGradleProject(project)) {
+		if (activeBuildSupport == null || !activeBuildSupport.applies(project)) {
 			return;
 		}
+
 		JavaLanguageServerPlugin.sendStatus(ServiceStatus.Message, "Updating "+ project.getName() + " configuration");
 		WorkspaceJob job = new WorkspaceJob("Update project "+project.getName()) {
 			@Override
@@ -226,10 +228,7 @@ public class ProjectsManager {
 				String projectName = project.getName();
 				try {
 					long start = System.currentTimeMillis();
-					Optional<IBuildSupport> buildSupport = getBuildSupport(project);
-					if (buildSupport.isPresent()) {
-						buildSupport.get().update(project, monitor);
-					}
+					activeBuildSupport.update(project, monitor);
 					long elapsed = System.currentTimeMillis() - start;
 					JavaLanguageServerPlugin.logInfo("Updated "+projectName + " in "+ elapsed +" ms");
 				} catch (CoreException e) {
@@ -241,14 +240,6 @@ public class ProjectsManager {
 			}
 		};
 		job.schedule();
-	}
-
-	private Optional<IBuildSupport> getBuildSupport(IProject project) {
-		return buildSupports().filter(bs -> bs.applies(project)).findFirst();
-	}
-
-	private Stream<IBuildSupport> buildSupports() {
-		return Stream.of(new GradleBuildSupport(), new MavenBuildSupport());
 	}
 
 	public void setConnection(JavaLanguageClient client) {
